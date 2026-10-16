@@ -5,6 +5,7 @@ from .agent import review
 from .assemble import assemble
 from .draw import color_of, overview_pages, spool_pages
 from .extract import extract
+from .graph import cypher, push
 
 A_TO_B = {15: 0.5, 20: 0.75, 25: 1, 32: 1.25, 40: 1.5, 50: 2, 65: 2.5, 80: 3, 90: 3.5, 100: 4, 125: 5, 150: 6}
 
@@ -37,6 +38,11 @@ def run(files, use_ai=True):
         if b:
             d["db"] = round(len(sp["welds"]) * b, 2)
         details[sp["name"]] = d
+    cy = cypher(sheets, spools, details)
+    try:
+        neo = push(cy)
+    except Exception as e:  # noqa: BLE001
+        neo = dict(pushed=False, reason=str(e)[:200])
     ov = overview_pages(docs, sheets, spools)
     spdf = spool_pages(docs, sheets, spools, details)
     owner = {r: sp["name"] for sp in spools for r in sp["runs"]}
@@ -50,6 +56,8 @@ def run(files, use_ai=True):
                       "png": _png(spdf[i], 45)} for i, sp in enumerate(spools)],
         review={k: v for k, v in rv.items() if k != "spools"},
         weld_b=b,
+        neo4j=neo,
+        cypher="\n".join(cy),
         spools_pdf=base64.b64encode(spdf.tobytes(garbage=3, deflate=True)).decode(),
         overview_pdf=base64.b64encode(ov.tobytes(garbage=3, deflate=True)).decode())
 

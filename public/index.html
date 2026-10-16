@@ -57,12 +57,15 @@ async function go(sample){
 }
 $('#run').onclick=()=>go(false);$('#sample').onclick=()=>go(true);
 const dl=(b,n)=>{const a=document.createElement('a');a.href='data:application/pdf;base64,'+b;a.download=n;a.click()};
+const dlt=(t,n)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/plain'}));a.download=n;a.click()};
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function render(j){
  window._j=j;const rv=j.review||{};const chips=j.spools.map(s=>`<span class="chip" style="background:${s.color}">${s.name}</span>`).join(' ');
  let h=`<div class="card"><h2 style="margin-top:0">結果: ${j.spools.length} スプール ${chips}</h2>
  <div class="row"><button onclick="dl(_j.spools_pdf,'spool_drawings.pdf')">スプール図 PDF（全スプール）</button>
- <button class="sec" onclick="dl(_j.overview_pdf,'spool_overview.pdf')">色分け図面 PDF</button></div>
+ <button class="sec" onclick="dl(_j.overview_pdf,'spool_overview.pdf')">色分け図面 PDF</button>
+ <button class="sec" onclick="dlt(_j.cypher,'spool_graph.cypher')">Neo4j グラフ (Cypher)</button>
+ <span class="muted">Neo4j: ${_j.neo4j&&_j.neo4j.pushed?'<span class=ok>保存済み ('+_j.neo4j.statements+' 文)</span>':'未接続 — Cypherをダウンロードしてインポート'}</span></div>
  <p class="muted">AI: ${esc(rv.provider||'オフ（ルールのみ）')}</p>${rv.summary_ja?`<p>${esc(rv.summary_ja)}</p>`:''}`;
  if(rv.checks&&rv.checks.length){const ng=rv.checks.filter(c=>!c.ok).length;
   h+=`<details ${ng?'open':''}><summary>BOM照合（シートBOM＝スプール配分の合計）: <span class="${ng?'ng':'ok'}">${ng?ng+'件不一致':'全項目一致'}</span></summary><table><tr><th>SHT</th><th>PT</th><th>品名</th><th>BOM</th><th>配分合計</th><th></th></tr>`+
