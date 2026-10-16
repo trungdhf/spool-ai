@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 
 import pymupdf
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
 
@@ -176,7 +176,6 @@ def _parse_bom(sh, page):
     x_desc, x_ns, x_qty = comp[0]["x0"] - 1, ns[0]["x0"] - 1, head[0]["x0"] - 1
     x_right = x_qty + 60
     rows, section, cat = [], None, None
-    tls = sorted([t for t in sh.text_lines if t["x0"] < x_right and t["y0"] > 20], key=lambda t: (round(t["y0"]), t["x0"]))
     words = sorted([w for w in sh.words if w["x0"] < x_right], key=lambda w: (round(w["y0"]), w["x0"]))
     ylines = {}
     for w in words:
