@@ -66,7 +66,7 @@ function render(j){
  <button class="sec" onclick="dl(_j.overview_pdf,'spool_overview.pdf')">色分け図面 PDF</button>
  <button class="sec" onclick="dlt(_j.cypher,'spool_graph.cypher')">Neo4j グラフ (Cypher)</button>
  <span class="muted">Neo4j: ${_j.neo4j&&_j.neo4j.pushed?'<span class=ok>保存済み ('+_j.neo4j.statements+' 文)</span>':'未接続 — Cypherをダウンロードしてインポート'}</span></div>
- <p class="muted">AI: ${esc(rv.provider||'オフ（ルールのみ）')}</p>${rv.summary_ja?`<p>${esc(rv.summary_ja)}</p>`:''}`;
+ <p class="muted">AI: ${esc(rv.provider||'オフ（ルールのみ）')}${(rv.fallback_from||[]).length?' <span class=warn>（'+esc(rv.fallback_from.map(f=>f.split(':')[0]).join(', '))+' は利用不可のためフォールバック）</span>':''}</p>${rv.summary_ja?`<p>${esc(rv.summary_ja)}</p>`:''}`;
  if(rv.checks&&rv.checks.length){const ng=rv.checks.filter(c=>!c.ok).length;
   h+=`<details ${ng?'open':''}><summary>BOM照合（シートBOM＝スプール配分の合計）: <span class="${ng?'ng':'ok'}">${ng?ng+'件不一致':'全項目一致'}</span></summary><table><tr><th>SHT</th><th>PT</th><th>品名</th><th>BOM</th><th>配分合計</th><th></th></tr>`+
   rv.checks.map(c=>`<tr><td>${c.sheet}</td><td>${c.pt}</td><td>${esc(c.desc)}</td><td>${c.bom}</td><td>${c.allocated}</td><td class="${c.ok?'ok':'ng'}">${c.ok?'OK':'NG'}</td></tr>`).join('')+'</table></details>'}

@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 AIAND_MODEL = os.environ.get("AIAND_MODEL", "deepseek-ai/deepseek-v4-flash")
@@ -43,31 +44,49 @@ def _vertex_token(sa):
     return json.loads(urllib.request.urlopen("https://oauth2.googleapis.com/token", data=data.encode()).read())["access_token"]
 
 
-def provider():
+def providers():
+    out = []
     if os.environ.get("AIAND_API_KEY"):
-        return "ai&", AIAND_MODEL
+        out.append(("ai&", AIAND_MODEL))
     if os.environ.get("GCP_SA_KEY_JSON"):
-        return "vertex", VERTEX_MODEL
-    return None, None
+        out.append(("vertex", VERTEX_MODEL))
+    return out
 
 
-def chat(messages):
-    name, model = provider()
+def provider():
+    p = providers()
+    return p[0] if p else (None, None)
+
+
+def _call(name, model, messages):
     body = {"model": model, "messages": messages, "response_format": {"type": "json_object"}, "temperature": 0.1}
     if name == "ai&":
         base = os.environ.get("AIAND_BASE_URL", "https://api.aiand.com/v1")
         r = _http(base + "/chat/completions", body, {"Authorization": "Bearer " + os.environ["AIAND_API_KEY"]})
-    elif name == "vertex":
+    else:
         sa = json.loads(os.environ["GCP_SA_KEY_JSON"])
         url = (f"https://aiplatform.googleapis.com/v1/projects/{sa['project_id']}/locations/global/"
                "endpoints/openapi/chat/completions")
         r = _http(url, body, {"Authorization": "Bearer " + _vertex_token(sa)})
-    else:
-        return None
     txt = r["choices"][0]["message"]["content"].strip()
     if txt.startswith("```"):
         txt = txt.strip("`").split("\n", 1)[1].rsplit("```", 1)[0]
     return json.loads(txt)
+
+
+def chat(messages):
+    """Try ai& first, then Vertex. Returns (json, provider label, failures)."""
+    fails = []
+    for name, model in providers():
+        try:
+            return _call(name, model, messages), f"{name} / {model}", fails
+        except urllib.error.HTTPError as e:
+            fails.append(f"{name} / {model}: HTTP {e.code} {e.read()[:160].decode(errors='ignore')}")
+        except Exception as e:  # noqa: BLE001
+            fails.append(f"{name} / {model}: {str(e)[:160]}")
+    if fails:
+        raise RuntimeError("; ".join(fails))
+    return None, None, fails
 
 
 def facts(sheets, spools):
@@ -94,9 +113,11 @@ def review(sheets, spools):
     if not name:
         return dict(provider=None, spools={}, erection=[], summary_ja="AI未設定（ルールのみで分割）")
     f = facts(sheets, spools)
-    res = chat([{"role": "system", "content": SYSTEM},
-                {"role": "user", "content": json.dumps(f, ensure_ascii=False, default=str)}]) or {}
-    res["provider"] = f"{name} / {model}"
+    res, used, fails = chat([{"role": "system", "content": SYSTEM},
+                             {"role": "user", "content": json.dumps(f, ensure_ascii=False, default=str)}])
+    res = res or {}
+    res["provider"] = used
+    res["fallback_from"] = fails
     res["checks"] = check(sheets, res)
     return res
 
