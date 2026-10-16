@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spool AI — 配管アイソメ図 → 工場製作スプール</title>
+<style>
+body{margin:0;font-family:system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;background:#f4f6f8;color:#1d2733}
+header{background:#14324f;color:#fff;padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+header h1{font-size:20px;margin:0}header small{opacity:.75}
+main{max-width:1400px;margin:0 auto;padding:18px}
+.card{background:#fff;border-radius:10px;box-shadow:0 1px 3px #0002;padding:16px;margin-bottom:16px}
+.drop{border:2px dashed #7a9cc0;border-radius:10px;padding:22px;text-align:center;cursor:pointer;background:#f8fbff}
+.drop.over{background:#e3efff}
+button{background:#1f6fd1;color:#fff;border:0;border-radius:6px;padding:9px 16px;font-size:14px;cursor:pointer}
+button.sec{background:#5a6b7d}button:disabled{opacity:.5}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.sheets{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:12px}
+.sheets img,.spool img{width:100%;border:1px solid #ccd;border-radius:6px;background:#fff}
+.chip{display:inline-block;padding:2px 9px;border-radius:12px;color:#fff;font-weight:600;font-size:13px}
+.spools{display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:14px}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid #e3e6ea;padding:4px 6px;text-align:left}
+.ok{color:#0a7d3c;font-weight:600}.ng{color:#c22;font-weight:600}.warn{color:#b35c00}
+#status{font-size:14px}.muted{color:#6b7a89;font-size:13px}
+</style></head><body>
+<header><h1>Spool AI</h1><small>CAD出力のアイソメ図PDFを読み取り、工場で製作できるスプールに自動分割・スプール図を作成 / Isometric PDF → shop spools</small></header>
+<main>
+<div class="card">
+ <div id="drop" class="drop">ここに CAD から出力した PDF をドロップ（複数シート可）<br><span class="muted">or click to choose files</span></div>
+ <input id="file" type="file" accept="application/pdf" multiple hidden>
+ <div class="row">
+  <button id="run">解析する / Analyze</button>
+  <button id="sample" class="sec">サンプル図面（4シート）で試す</button>
+  <label><input id="ai" type="checkbox" checked> AIエージェントで検証（BOM配分・切断長）</label>
+  <span id="status"></span>
+ </div>
+ <div id="files" class="muted"></div>
+</div>
+<div id="out"></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);let files=[];
+const drop=$('#drop'),inp=$('#file');
+drop.onclick=()=>inp.click();inp.onchange=()=>setFiles([...inp.files]);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};drop.ondragleave=()=>drop.classList.remove('over');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');setFiles([...e.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.pdf')))};
+function setFiles(f){files=f;$('#files').textContent=f.map(x=>x.name).join(' / ')}
+const b64=f=>new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(f)});
+async function go(sample){
+ if(!sample&&!files.length){alert('PDFを選択してください');return}
+ $('#run').disabled=$('#sample').disabled=true;const t0=Date.now();
+ $('#status').textContent=$('#ai').checked?'解析中… ベクトル抽出 → スプール分割 → AIエージェント検証（〜1分）':'解析中…';
+ try{
+  const body={ai:$('#ai').checked,files:sample?[]:await Promise.all(files.map(async f=>({name:f.name,data:await b64(f)})))};
+  const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();if(j.error)throw new Error(j.error);render(j);
+  $('#status').textContent=`完了 (${((Date.now()-t0)/1000).toFixed(1)}s)`;
+ }catch(e){$('#status').innerHTML='<span class="ng">エラー: '+e.message+'</span>'}
+ $('#run').disabled=$('#sample').disabled=false;
+}
+$('#run').onclick=()=>go(false);$('#sample').onclick=()=>go(true);
+const dl=(b,n)=>{const a=document.createElement('a');a.href='data:application/pdf;base64,'+b;a.download=n;a.click()};
+const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function render(j){
+ window._j=j;const rv=j.review||{};const chips=j.spools.map(s=>`<span class="chip" style="background:${s.color}">${s.name}</span>`).join(' ');
+ let h=`<div class="card"><h2 style="margin-top:0">結果: ${j.spools.length} スプール ${chips}</h2>
+ <div class="row"><button onclick="dl(_j.spools_pdf,'spool_drawings.pdf')">スプール図 PDF（全スプール）</button>
+ <button class="sec" onclick="dl(_j.overview_pdf,'spool_overview.pdf')">色分け図面 PDF</button></div>
+ <p class="muted">AI: ${esc(rv.provider||'オフ（ルールのみ）')}</p>${rv.summary_ja?`<p>${esc(rv.summary_ja)}</p>`:''}`;
+ if(rv.checks&&rv.checks.length){const ng=rv.checks.filter(c=>!c.ok).length;
+  h+=`<details ${ng?'open':''}><summary>BOM照合（シートBOM＝スプール配分の合計）: <span class="${ng?'ng':'ok'}">${ng?ng+'件不一致':'全項目一致'}</span></summary><table><tr><th>SHT</th><th>PT</th><th>品名</th><th>BOM</th><th>配分合計</th><th></th></tr>`+
+  rv.checks.map(c=>`<tr><td>${c.sheet}</td><td>${c.pt}</td><td>${esc(c.desc)}</td><td>${c.bom}</td><td>${c.allocated}</td><td class="${c.ok?'ok':'ng'}">${c.ok?'OK':'NG'}</td></tr>`).join('')+'</table></details>'}
+ h+=`</div><div class="card"><h3 style="margin-top:0">元図面（スプール別に色分け）</h3><div class="sheets">`+
+  j.sheets.map(s=>`<div><b>SHT ${s.sheet_no}</b> <span class="muted">${esc(s.file)} · PIPE SPOOLS: ${s.spool_list.join(', ')} · 溶接 ${s.welds.length}</span><img src="data:image/png;base64,${s.png}"></div>`).join('')+`</div></div>`;
+ h+=`<div class="card"><h3 style="margin-top:0">スプール図 / Spool drawings</h3><div class="spools">`+j.spools.map(s=>{const d=s.detail||{};
+  const notes=[...(s.needs_review||[]),...(d.notes||[])];
+  return `<div class="spool"><h3><span class="chip" style="background:${s.color}">${s.name}</span> SHT ${s.sheets.join(', ')}</h3>
+  <img src="data:image/png;base64,${s.png}">
+  <table><tr><th>工場溶接</th><td>${s.welds.length} 箇所（No. ${s.welds.join(', ')}）</td></tr>
+  ${d.db!=null?`<tr><th>溶接DB</th><td>${d.db}（${j.weld_b}B × ${s.welds.length}）</td></tr>`:''}
+  <tr><th>エルボ</th><td>${s.bends}</td></tr>${d.pipe_length_mm?`<tr><th>管切断長</th><td>${d.pipe_length_mm} mm</td></tr>`:''}
+  <tr><th>シート間接続</th><td>${s.conts.map(c=>`SHT${c.sheet} CONT.${c.kind} SHT${c.to??'?'}`).join('<br>')||'-'}</td></tr>
+  ${(d.bom||[]).length?`<tr><th>材料</th><td>${d.bom.map(b=>`SHT${b.sheet} PT${b.pt} ${esc(b.desc)} ×${esc(b.qty)}`).join('<br>')}</td></tr>`:''}
+  ${notes.length?`<tr><th class="warn">要確認</th><td class="warn">${notes.map(esc).join('<br>')}</td></tr>`:''}</table></div>`}).join('')+`</div></div>`;
+ $('#out').innerHTML=h;
+}
+</script></body></html>

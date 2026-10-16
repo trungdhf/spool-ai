@@ -1,0 +1,3 @@
+{
+  "functions": {"api/analyze.py": {"maxDuration": 300, "memory": 2048, "includeFiles": "{spool/**,samples/*.pdf}"}}
+}
