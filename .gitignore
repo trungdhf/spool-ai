@@ -3,3 +3,4 @@ __pycache__/
 .vercel/
 .env*
 tools/aiand-docs.txt
+.vercel
