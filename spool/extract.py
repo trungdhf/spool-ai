@@ -67,6 +67,15 @@ def _thickness(poly):
     return 2 * poly.area / poly.length if poly.length else 0
 
 
+def _polys(g):
+    """Polygon parts of any geometry (buffer(0) on self-intersecting CAD paths yields MultiPolygons)."""
+    if g.is_empty:
+        return []
+    if g.geom_type == "Polygon":
+        return [g]
+    return [p for sub in getattr(g, "geoms", []) for p in _polys(sub)]
+
+
 def extract_page(page, index):
     sh = Sheet(index=index, width=page.rect.width, height=page.rect.height)
     page_area = page.rect.width * page.rect.height
@@ -76,14 +85,15 @@ def extract_page(page, index):
             pts = _poly_points(d)
             if len(pts) < 4:
                 continue
-            poly = Polygon(pts).buffer(0)
-            if poly.is_empty or poly.area < 2:
-                continue
-            if len(pts) <= 5 and poly.area > 8:
-                sh.arrows.append(poly)
-            t = _thickness(poly)
-            if 1.6 < t < 3.8 and poly.length > 10:
-                sh.pipes.append(poly)
+            fixed = Polygon(pts).buffer(0)
+            for poly in _polys(fixed):
+                if poly.area < 2:
+                    continue
+                if len(pts) <= 5 and poly.area > 8:
+                    sh.arrows.append(poly)
+                t = _thickness(poly)
+                if 1.6 < t < 3.8 and poly.length > 10:
+                    sh.pipes.append(poly)
         if d["type"] in ("s", "fs"):
             items = d["items"]
             if items and all(i[0] == "c" for i in items) and len(items) >= 4:
@@ -129,6 +139,8 @@ def _run_ends(geom, pipes):
         if len(coords) < 4:
             continue
         rect = p.minimum_rotated_rectangle
+        if rect.geom_type != "Polygon":
+            continue
         rc = list(rect.exterior.coords)[:4]
         e = [((rc[k][0] + rc[(k + 1) % 4][0]) / 2, (rc[k][1] + rc[(k + 1) % 4][1]) / 2,
               Point(rc[k]).distance(Point(rc[(k + 1) % 4]))) for k in range(4)]

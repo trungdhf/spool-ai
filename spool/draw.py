@@ -1,13 +1,15 @@
 """Per-spool drawings: one A3-landscape page per spool, cut from the source vector pages."""
 import pymupdf
 
+from .extract import _polys
+
 A3 = pymupdf.paper_rect("a3-l")
 COLORS = [(0.85, 0.1, 0.1), (0.1, 0.4, 0.9), (0.0, 0.6, 0.3), (0.85, 0.45, 0.0), (0.55, 0.2, 0.75), (0.0, 0.6, 0.7)]
 FONT = "helv"
 
 
 def _poly(page, geom, color, opacity=1.0, fill=True):
-    geoms = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
+    geoms = _polys(geom)
     for g in geoms:
         pts = [pymupdf.Point(x, y) for x, y in g.exterior.coords]
         sh = page.new_shape()
@@ -62,7 +64,10 @@ def spool_pages(src_docs, sheets, spools, details=None):
             x0 = min(r["bbox"][0] for r in runs); y0 = min(r["bbox"][1] for r in runs)
             x1 = max(r["bbox"][2] for r in runs); y1 = max(r["bbox"][3] for r in runs)
             pad = 70
-            clip = pymupdf.Rect(x0 - pad, y0 - pad, x1 + pad, y1 + pad) & pymupdf.Rect(sh.width * 0.25, 0, sh.width, sh.height)
+            raw = pymupdf.Rect(x0 - pad, y0 - pad, x1 + pad, y1 + pad) & pymupdf.Rect(0, 0, sh.width, sh.height)
+            clip = raw & pymupdf.Rect(sh.width * 0.25, 0, sh.width, sh.height)
+            if clip.is_empty or clip.width < 20 or clip.height < 20:
+                clip = raw
             s = min((cell.width - 10) / clip.width, (cell.height - 40) / clip.height, 2.0)
             w, h = clip.width * s, clip.height * s
             tgt = pymupdf.Rect(cell.x0 + (cell.width - w) / 2, cell.y0 + 30, cell.x0 + (cell.width + w) / 2, cell.y0 + 30 + h)
