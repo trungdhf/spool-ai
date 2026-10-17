@@ -6,6 +6,7 @@ from .assemble import assemble
 from .draw import color_of, overview_pages, spool_pages
 from .extract import extract
 from .graph import cypher, push
+from .model3d import build as build3d, csv_3dmodeleditor, pcf
 
 A_TO_B = {15: 0.5, 20: 0.75, 25: 1, 32: 1.25, 40: 1.5, 50: 2, 65: 2.5, 80: 3, 90: 3.5, 100: 4, 125: 5, 150: 6}
 
@@ -40,6 +41,14 @@ def run(files, use_ai=True):
         details[sp["name"]] = d
     cy = cypher(sheets, spools, details)
     try:
+        m3 = build3d(sheets, spools, docs)
+    except Exception:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        m3 = dict(units="mm", spools=[], sheets=[])
+    m3csv = {sp["name"]: csv_3dmodeleditor(sp["name"], sp) for sp in m3["spools"] if sp["segments"]}
+    m3pcf = {sp["name"]: pcf(sp["name"], sp) for sp in m3["spools"] if sp["segments"]}
+    try:
         neo = push(cy)
     except Exception as e:  # noqa: BLE001
         neo = dict(pushed=False, reason=str(e)[:200])
@@ -58,6 +67,9 @@ def run(files, use_ai=True):
         weld_b=b,
         neo4j=neo,
         cypher="\n".join(cy),
+        model3d=m3,
+        model3d_csv=m3csv,
+        model3d_pcf=m3pcf,
         spools_pdf=base64.b64encode(spdf.tobytes(garbage=3, deflate=True)).decode(),
         overview_pdf=base64.b64encode(ov.tobytes(garbage=3, deflate=True)).decode())
 

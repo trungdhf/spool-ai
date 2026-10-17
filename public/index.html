@@ -19,6 +19,8 @@ button.sec{background:#5a6b7d}button:disabled{opacity:.5}
 table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid #e3e6ea;padding:4px 6px;text-align:left}
 .ok{color:#0a7d3c;font-weight:600}.ng{color:#c22;font-weight:600}.warn{color:#b35c00}
 #status{font-size:14px}.muted{color:#6b7a89;font-size:13px}
+#v3d{width:100%;height:520px;border:1px solid #ccd;border-radius:6px;background:#101820}
+.axisnote{font-size:12px;color:#6b7a89}
 </style></head><body>
 <header><h1>Spool AI</h1><small>CAD出力のアイソメ図PDFを読み取り、工場で製作できるスプールに自動分割・スプール図を作成 / Isometric PDF → shop spools</small></header>
 <main>
@@ -59,6 +61,23 @@ $('#run').onclick=()=>go(false);$('#sample').onclick=()=>go(true);
 const dl=(b,n)=>{const a=document.createElement('a');a.href='data:application/pdf;base64,'+b;a.download=n;a.click()};
 const dlt=(t,n)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/plain'}));a.download=n;a.click()};
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function model3dCard(j){
+ const m=j.model3d;if(!m||!m.spools||!m.spools.length)return '';
+ const opts=['<option value="all">全体（組立）</option>']+m.spools.map((s,i)=>`<option value="${i}">${s.name}${s.status==='OK'?'':' ⚠要確認'}</option>`).join('');
+ let h=`<div class="card"><h3 style="margin-top:0">3Dモデル（アイソメ → 3D座標）</h3>
+ <div class="row"><select id="sel3d" style="padding:8px;border-radius:6px">${opts}</select>
+ <button class="sec" onclick="dlt(JSON.stringify(_j.model3d,null,1),'model3d.json')">JSON</button>`+
+ m.spools.map((s,i)=>`<button class="sec" onclick="dlt(_j.model3d_csv['${s.name}'],'${s.name}_3DModelEditor.csv')">${s.name} CSV</button>`).join('')+
+ m.spools.map((s,i)=>`<button class="sec" onclick="dlt(_j.model3d_pcf['${s.name}'],'${s.name}.pcf')">${s.name} PCF</button>`).join('')+`</div>
+ <div id="v3d"></div>
+ <div class="axisnote">X=E, Y=N, Z=up ／ 各スプールの最初のノード=(0,0,0) ／ CSV=3DModelEditor形式, PCF=ISOGEN形式 ／ ⚠要確認=寸法なし推定・斜管</div>
+ <div id="v3dtable"></div></div>`;
+ return h;
+}
+function segsTable(sp){
+ return `<table><tr><th>from</th><th>to</th><th>軸</th><th>長さmm</th><th>根拠</th><th></th></tr>`+
+  sp.segments.map(s=>`<tr><td>${s.a}</td><td>${s.b}</td><td>${s.axis}</td><td>${s.length_mm}</td><td>${esc(s.source)}</td><td class="${s.confidence==='high'?'ok':'warn'}">${s.confidence}</td></tr>`).join('')+`</table>`;
+}
 function render(j){
  window._j=j;const rv=j.review||{};const chips=j.spools.map(s=>`<span class="chip" style="background:${s.color}">${s.name}</span>`).join(' ');
  let h=`<div class="card"><h2 style="margin-top:0">結果: ${j.spools.length} スプール ${chips}</h2>
@@ -70,7 +89,7 @@ function render(j){
  if(rv.checks&&rv.checks.length){const ng=rv.checks.filter(c=>!c.ok).length;
   h+=`<details ${ng?'open':''}><summary>BOM照合（シートBOM＝スプール配分の合計）: <span class="${ng?'ng':'ok'}">${ng?ng+'件不一致':'全項目一致'}</span></summary><table><tr><th>SHT</th><th>PT</th><th>品名</th><th>BOM</th><th>配分合計</th><th></th></tr>`+
   rv.checks.map(c=>`<tr><td>${c.sheet}</td><td>${c.pt}</td><td>${esc(c.desc)}</td><td>${c.bom}</td><td>${c.allocated}</td><td class="${c.ok?'ok':'ng'}">${c.ok?'OK':'NG'}</td></tr>`).join('')+'</table></details>'}
- h+=`</div><div class="card"><h3 style="margin-top:0">元図面（スプール別に色分け）</h3><div class="sheets">`+
+ h+=`</div>`+model3dCard(j)+`<div class="card"><h3 style="margin-top:0">元図面（スプール別に色分け）</h3><div class="sheets">`+
   j.sheets.map(s=>`<div><b>SHT ${s.sheet_no}</b> <span class="muted">${esc(s.file)} · PIPE SPOOLS: ${s.spool_list.join(', ')} · 溶接 ${s.welds.length}</span><img src="data:image/png;base64,${s.png}"></div>`).join('')+`</div></div>`;
  h+=`<div class="card"><h3 style="margin-top:0">スプール図 / Spool drawings</h3><div class="spools">`+j.spools.map(s=>{const d=s.detail||{};
   const notes=[...(s.needs_review||[]),...(d.notes||[])];
@@ -83,5 +102,76 @@ function render(j){
   ${(d.bom||[]).length?`<tr><th>材料</th><td>${d.bom.map(b=>`SHT${b.sheet} PT${b.pt} ${esc(b.desc)} ×${esc(b.qty)}`).join('<br>')}</td></tr>`:''}
   ${notes.length?`<tr><th class="warn">要確認</th><td class="warn">${notes.map(esc).join('<br>')}</td></tr>`:''}</table></div>`}).join('')+`</div></div>`;
  $('#out').innerHTML=h;
+ if(j.model3d&&j.model3d.spools&&j.model3d.spools.length)setup3d(j);
+}
+</script>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {CSS2DRenderer,CSS2DObject} from 'three/addons/renderers/CSS2DRenderer.js';
+let ren,scene,cam,orb,lab,group;
+window.setup3d=function(j){
+ const el=document.getElementById('v3d');if(!el||ren)return;
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x101820);
+ cam=new THREE.PerspectiveCamera(50,el.clientWidth/el.clientHeight,1,1e6);
+ ren=new THREE.WebGLRenderer({antialias:true});ren.setSize(el.clientWidth,el.clientHeight);el.appendChild(ren.domElement);
+ lab=new CSS2DRenderer();lab.setSize(el.clientWidth,el.clientHeight);lab.domElement.style.cssText='position:absolute;pointer-events:none;top:0';el.style.position='relative';el.appendChild(lab.domElement);
+ orb=new OrbitControls(cam,ren.domElement);
+ scene.add(new THREE.AmbientLight(0xffffff,1.1));
+ const d=new THREE.DirectionalLight(0xffffff,1.2);d.position.set(3,6,4);scene.add(d);
+ scene.add(new THREE.AxesHelper(1500)); // x=E赤, y=Z(up)緑, z=-N青
+ group=new THREE.Group();scene.add(group);
+ const sel=document.getElementById('sel3d');sel.onchange=()=>show3d(j,sel.value);
+ show3d(j,sel.value);
+ (function loop(){requestAnimationFrame(loop);orb.update();ren.render(scene,cam);lab.render(scene,cam);})();
+};
+const V=p=>new THREE.Vector3(p[0],p[2],-p[1]); // (X,Y,Z)->three(x,y,z)=(E,Zup,-N)
+const NC={weld:0xffa726,end:0xef5350,flange:0xb0bec5,elbow:0x42a5f5,tee:0x66bb6a};
+function show3d(j,mode){
+ while(group.children.length)group.remove(group.children[0]);
+ let nodes={},segs=[],title='';
+ if(mode==='all'){
+  let off=0;
+  for(const shd of j.model3d.sheets){const m=shd.model;
+   let mn=1e9,mx=-1e9;
+   for(const n of m.nodes){mn=Math.min(mn,n.g[0]);mx=Math.max(mx,n.g[0])}
+   if(!m.nodes.length){mn=0;mx=0}
+   for(const n of m.nodes)nodes['s'+shd.index+':'+n.id]={...n,p:[n.g[0]+off-mn,n.g[1],n.g[2]],id:n.id};
+   for(const s of m.segs)segs.push({...s,a:'s'+shd.index+':'+s.a,b:'s'+shd.index+':'+s.b});
+   off+=mx-mn+4000;}
+  document.getElementById('v3dtable').innerHTML='';
+ }else{
+  const sp=j.model3d.spools[+mode];title=sp.name;
+  for(const n of sp.nodes)nodes[n.id]={...n,p:[...n.p]};
+  segs=sp.segments;
+  // spread disconnected fragments (e.g. spool continues on other sheets) side by side
+  const par={};const find=x=>par[x]===x?x:(par[x]=find(par[x]));
+  for(const id in nodes)par[id]=id;
+  for(const s of segs)if(nodes[s.a]&&nodes[s.b])par[find(s.a)]=find(s.b);
+  const comps={};for(const id in nodes)(comps[find(id)]??=[]).push(id);
+  let off=0;
+  for(const ids of Object.values(comps)){
+   let mn=1e9,mx=-1e9;for(const id of ids){mn=Math.min(mn,nodes[id].p[0]);mx=Math.max(mx,nodes[id].p[0])}
+   for(const id of ids)nodes[id].p[0]+=off-mn;off+=mx-mn+3000;}
+  document.getElementById('v3dtable').innerHTML=segsTable(sp);
+ }
+ const mat={pipe:new THREE.MeshStandardMaterial({color:0x4f9cf0}),joint:new THREE.MeshStandardMaterial({color:0xffd54f}),bridge:new THREE.MeshStandardMaterial({color:0x66bb6a}),SL:new THREE.MeshStandardMaterial({color:0xba68c8})};
+ let min=[1e9,1e9,1e9],max=[-1e9,-1e9,-1e9];
+ for(const s of segs){const a=nodes[s.a],b=nodes[s.b];if(!a||!b)continue;
+  const A=V(a.p),B=V(b.p),dir=B.clone().sub(A),L=dir.length();if(L<0.1)continue;
+  const od=(a.bore||b.bore||80)*1.6;
+  const c=new THREE.Mesh(new THREE.CylinderGeometry(od/2,od/2,L,14),mat[s.axis==='SL'?'SL':(s.kind||'pipe')]||mat.pipe);
+  c.position.copy(A.clone().add(B).multiplyScalar(0.5));c.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());group.add(c);
+  [a.p,b.p].forEach(p=>{for(let k=0;k<3;k++){min[k]=Math.min(min[k],p[k]);max[k]=Math.max(max[k],p[k])}});}
+ for(const n of Object.values(nodes)){
+  const r=n.type==='flange'?(n.bore||80)*1.6:(n.bore||80)*0.9;
+  const g=n.type==='flange'?new THREE.CylinderGeometry(r,r,(n.bore||80)*0.5,16):new THREE.SphereGeometry(r,12,10);
+  const me=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:NC[n.type]||0xffa726}));me.position.copy(V(n.p));group.add(me);
+  if(n.refs&&n.refs.length){const t=document.createElement('div');t.textContent=n.refs.join(' ');t.style.cssText='color:#fff;font-size:12px;background:#0008;padding:0 4px;border-radius:3px';const o=new CSS2DObject(t);o.position.copy(V(n.p).add(new THREE.Vector3(0,(n.bore||80)*2.2,0)));group.add(o);}
+ }
+ const box=new THREE.Box3().setFromObject(group),ctr=box.getCenter(new THREE.Vector3()),sz=box.getSize(new THREE.Vector3());
+ const R=Math.max(sz.x,sz.y,sz.z,500);
+ cam.position.set(ctr.x+R*0.8,ctr.y+R*0.7,ctr.z+R*0.9);orb.target.copy(ctr);cam.updateProjectionMatrix();
 }
 </script></body></html>
