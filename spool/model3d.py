@@ -233,6 +233,22 @@ def _flange_types(sh):
     return ft
 
 
+def _elbow_rad(sh):
+    """bore -> elbow radius factor over nominal A: 'sr' short (1.0xA) | 'lr' long (1.5xA, default).
+    BOM descriptions like 'ｴﾙﾎﾞ 550 (S)' / 'SR' / 'SHORT' mark short-radius elbows."""
+    import re as _re
+    er = {}
+    for b in sh.bom:
+        d = str(b.get("desc") or "").upper()
+        if "ELBOW" not in d and "ｴﾙﾎﾞ" not in d:
+            continue
+        m = _re.search(r"\d+", str(b.get("ns", "")))
+        bore = int(m.group()) if m else 0
+        t = "sr" if _re.search(r"\bSR\b|SHORT|[（(]\s*S\s*[）)]", d) else "lr"
+        er.setdefault(bore, t)
+    return er
+
+
 def build(sheets, spools, docs):
     """sheets: extract output; spools: assemble output; docs: {sheet_index: (doc, page_no)}.
     Returns model dict with per-spool local coords and per-sheet assembled coords."""
@@ -241,6 +257,7 @@ def build(sheets, spools, docs):
     for sh in sheets:
         sh_bore = _sheet_bore(sh)
         sh_ftype = _flange_types(sh)
+        sh_er = _elbow_rad(sh)
         page = docs[sh.index][0][docs[sh.index][1]] if docs.get(sh.index) else None
         segs, elbows = _pipe_pieces(sh)
         pts, ptag = [], []
@@ -330,6 +347,8 @@ def build(sheets, spools, docs):
                 n["type"] = "flange" if n["type"] in ("end", "weld") else n["type"]
             if n["type"] == "flange":
                 n["ftype"] = sh_ftype.get(sh_bore, sh_ftype.get(0, "sop"))
+            elif n["type"] == "elbow":
+                n["er"] = sh_er.get(sh_bore, sh_er.get(0, "lr"))
         out["sheets"].append({"index": sh.index, "sheet_no": sh.title.get("sheet_no"),
                               "file": sh.title.get("file"), "nodes": nodes, "segs": seg3d,
                               "dims_found": len(dims), "bore": sh_bore})
@@ -398,7 +417,7 @@ def build(sheets, spools, docs):
             g = shd["gpos"][i]
             local = tuple(round(g[k] - origin[k], 1) for k in range(3))
             outnodes.append({"id": node_ids[(si, i)], "type": n["type"], "refs": n["refs"],
-                             "bore": bore, "ftype": n.get("ftype"),
+                             "bore": bore, "ftype": n.get("ftype"), "er": n.get("er"),
                              "p": list(local), "g": [round(v, 1) for v in g],
                              "sheet": shd["sheet_no"], "px": [round(n["x"], 1), round(n["y"], 1)]})
         for shd in out["sheets"]:
@@ -424,7 +443,7 @@ def build(sheets, spools, docs):
     for shd in out["sheets"]:
         shd["model"] = {
             "nodes": [{"id": i, "g": [round(v, 1) for v in shd["gpos"][i]], "type": n["type"],
-                       "ftype": n.get("ftype"),
+                       "ftype": n.get("ftype"), "er": n.get("er"),
                        "refs": n["refs"], "run": n["run"], "x": round(n["x"], 1), "y": round(n["y"], 1)}
                       for i, n in enumerate(shd["nodes"]) if i in shd["gpos"]],
             "segs": [{"a": s["a"], "b": s["b"], "axis": s["axis"], "length_mm": s["length_mm"],

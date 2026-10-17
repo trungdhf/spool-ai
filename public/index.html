@@ -240,7 +240,8 @@ function show3d(j,mode){
    const phi=Math.PI-Math.acos(cosd);
    if(phi>0.05){const n=nodes[id],bore=n.bore||defBore,p=V(n.p);
     const leg=Math.min(V(nodes[links[0].o].p).distanceTo(p),V(nodes[links[1].o].p).distanceTo(p));
-    tanLen[id]=Math.min(1.5*bore*Math.tan(phi/2),leg*0.45);}}}
+    const R=(n.er==='sr'?1.0:1.5)*bore;  // SRｴﾙﾎﾞ=1.0xA / LR=1.5xA (BOM)
+    tanLen[id]=Math.min(R*Math.tan(phi/2),leg*0.45);}}}
  for(const s of segs){if((s.kind||'pipe')!=='pipe')continue;const a=nodes[s.a],b=nodes[s.b];
   const A=V(a.p),B=V(b.p),dir=B.clone().sub(A).normalize(),L=A.distanceTo(B);
   const od=POD[a.bore||b.bore||defBore]||(a.bore||b.bore||defBore)*1.2;
@@ -249,7 +250,7 @@ function show3d(j,mode){
  for(const n of Object.values(nodes)){const p=V(n.p);const links=adj[n.id]||[];
   const bore=n.bore||defBore,od=POD[bore]||bore*1.2,pr=od/2;
   if(links.length===2&&tanLen[n.id]!==undefined){
-   const e=bendGeom(p,links[0].dir,links[1].dir,1.5*bore,pr,tanLen[n.id]);if(e)group.add(e);
+   const e=bendGeom(p,links[0].dir,links[1].dir,(n.er==='sr'?1.0:1.5)*bore,pr,tanLen[n.id]);if(e)group.add(e);
    if(n.type==='weld'){const d=links[0].dir;
     const w=cylBetween(p.clone().addScaledVector(d,-5),p.clone().addScaledVector(d,5),pr*1.08,mWeld);if(w)group.add(w);}}
   else if(n.type==='tee'&&links.length>=3){
