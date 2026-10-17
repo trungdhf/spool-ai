@@ -30,7 +30,12 @@ def run(files, use_ai=True):
             docs[sh.index] = (doc, k)
         sheets += shs
     sheets.sort(key=lambda s: s.title["sheet_no"])
+    warnings = []
+    if not sheets:
+        warnings.append("図面（配管ライン）を抽出できませんでした。ベクター PDF か確認してください")
     spools = assemble(sheets)
+    if sheets and not spools:
+        warnings.append("スプールが検出できませんでした（PIPE SPOOLS 一覧 / スプール番号の引出線が見つからない可能性）")
     rv = review(sheets, spools) if use_ai else dict(provider=None, spools={}, summary_ja="AIオフ")
     b = nominal_b(sheets)
     details = {}
@@ -64,6 +69,7 @@ def run(files, use_ai=True):
         spools=[sp | {"color": "#%02x%02x%02x" % tuple(int(c * 255) for c in color_of(i)), "detail": details[sp["name"]],
                       "png": _png(spdf[i], 45)} for i, sp in enumerate(spools)],
         review={k: v for k, v in rv.items() if k != "spools"},
+        warnings=warnings,
         weld_b=b,
         neo4j=neo,
         cypher="\n".join(cy),
