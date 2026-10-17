@@ -97,7 +97,7 @@ def spool_pages(src_docs, sheets, spools, details=None):
             others = [r for r in sh.runs if r["id"] not in sp["runs"]]
             for r in others:
                 g = affinity.affine_transform(r["geom"].buffer(1.5), [s, 0, 0, s, tgt.x0 - clip.x0 * s, tgt.y0 - clip.y0 * s])
-                _poly(page, g, (1, 1, 1), 0.75)
+                _poly(page, g, (0.78, 0.78, 0.78), 0.5)  # 他スプールは淡いグレーで残す
             for r in runs:
                 g = affinity.affine_transform(r["geom"].buffer(0.6), [s, 0, 0, s, tgt.x0 - clip.x0 * s, tgt.y0 - clip.y0 * s])
                 _poly(page, g, col, 0.9)
