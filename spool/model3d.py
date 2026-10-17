@@ -11,6 +11,7 @@ Rules (same as the 配管アイソメ 3D-coordinate agent):
 """
 import math
 
+import pymupdf
 from shapely.geometry import Point
 
 # JIS-ish outside diameters (mm) for display
@@ -133,11 +134,16 @@ def _dims(page, sh):
     """Dimension candidates: numeric spans >=30mm in the drawing area, with the
     text direction (rotated dims follow the iso axes)."""
     dims = []
-    d = page.get_text("dict")
+    d = page.get_text("dict")   # unrotated coords like get_drawings -> map to display space
+    M = page.rotation_matrix if page.rotation else None
+    M0 = pymupdf.Matrix(M.a, M.b, M.c, M.d, 0, 0) if M is not None else None  # vectors: no translation
     bom_x = sh.width * 0.24           # left columns = weld table / BOM on these sheets
     for block in d["blocks"]:
         for line in block.get("lines", []):
             dr = line.get("dir", (1, 0))
+            if M0 is not None:
+                dv = pymupdf.Point(*dr) * M0
+                dr = (dv.x, dv.y)
             for sp in line.get("spans", []):
                 t = sp["text"].strip().replace(",", "")
                 if not t.isdigit():
@@ -147,13 +153,19 @@ def _dims(page, sh):
                     continue
                 ox, oy = sp.get("origin", (sp["bbox"][0], sp["bbox"][3]))
                 x0, y0, x1, y1 = sp["bbox"]
+                if M is not None:
+                    op = pymupdf.Point(ox, oy) * M
+                    ox, oy = op.x, op.y
+                    cs = [pymupdf.Point(x, y) * M for x in (x0, x1) for y in (y0, y1)]
+                    x0, y0, x1, y1 = (min(c.x for c in cs), min(c.y for c in cs),
+                                      max(c.x for c in cs), max(c.y for c in cs))
                 cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
                 if cx < bom_x or (cy > sh.height * 0.85 and cx > sh.width * 0.8):
                     continue
                 if any((cx - c[0]) ** 2 + (cy - c[1]) ** 2 < (c[2] + 1) ** 2 for c in sh.circles):
                     continue          # circled weld number, not a dim
                 dims.append({"v": v, "cx": cx, "cy": cy, "ox": ox, "oy": oy,
-                             "dir": (dr[0], -dr[1]), "bbox": sp["bbox"]})
+                             "dir": (dr[0], -dr[1]), "bbox": (x0, y0, x1, y1)})
     return dims
 
 

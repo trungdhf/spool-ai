@@ -9,7 +9,9 @@ from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
 
-def _poly_points(d):
+def _poly_points(d, M=None):
+    """Drawing item points. M (page.rotation_matrix) maps them to display space:
+    get_drawings() is unrotated, while words/pixmap/overlays are rotated."""
     pts = []
     for it in d["items"]:
         if it[0] == "l":
@@ -22,6 +24,8 @@ def _poly_points(d):
         elif it[0] == "qu":
             q = it[1]
             pts += [q.ul, q.ur, q.lr, q.ll]
+    if M is not None:
+        pts = [p * M for p in pts]
     out = []
     for p in pts:
         t = (round(p.x, 2), round(p.y, 2))
@@ -30,17 +34,27 @@ def _poly_points(d):
     return out
 
 
-def _segments(d):
+def _segments(d, M=None):
     for it in d["items"]:
         if it[0] == "l":
-            yield (it[1].x, it[1].y), (it[2].x, it[2].y)
+            pts = [it[1], it[2]]
         elif it[0] == "c":
-            yield (it[1].x, it[1].y), (it[4].x, it[4].y)
+            pts = [it[1], it[4]]
         elif it[0] == "re":
             r = it[1]
-            c = [r.tl, r.tr, r.br, r.bl, r.tl]
-            for a, b in zip(c, c[1:]):
+            pts = list(zip([r.tl, r.tr, r.br, r.bl], [r.tr, r.br, r.bl, r.tl]))
+        else:
+            continue
+        if it[0] == "re":
+            for a, b in pts:
+                if M is not None:
+                    a, b = a * M, b * M
                 yield (a.x, a.y), (b.x, b.y)
+        else:
+            a, b = pts
+            if M is not None:
+                a, b = a * M, b * M
+            yield (a.x, a.y), (b.x, b.y)
 
 
 @dataclass
@@ -79,10 +93,12 @@ def _polys(g):
 def extract_page(page, index):
     sh = Sheet(index=index, width=page.rect.width, height=page.rect.height)
     page_area = page.rect.width * page.rect.height
+    # get_drawings() is unrotated; everything else (words, pixmap, overlays, clips) is display space
+    M = page.rotation_matrix if page.rotation else None
     drawings = page.get_drawings()
     for d in drawings:
         if d["type"] in ("f", "fs") and d["rect"].width * d["rect"].height < page_area * 0.5:
-            pts = _poly_points(d)
+            pts = _poly_points(d, M)
             if len(pts) < 4:
                 continue
             fixed = Polygon(pts).buffer(0)
@@ -97,15 +113,23 @@ def extract_page(page, index):
         if d["type"] in ("s", "fs"):
             items = d["items"]
             if items and all(i[0] == "c" for i in items) and len(items) >= 4:
-                r = d["rect"]
+                r = d["rect"] * M if M is not None else d["rect"]
                 if 6 < r.width < 25 and abs(r.width - r.height) < 1.5:
                     sh.circles.append(((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2, r.width / 2))
                     continue
-            for a, b in _segments(d):
+            for a, b in _segments(d, M):
                 if (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 > 1:
                     sh.thin.append((a, b))
 
-    sh.words = [dict(x0=w[0], y0=w[1], x1=w[2], y1=w[3], text=w[4].replace("\xad", "-"), block=w[5], line=w[6])
+    def _wr(w):
+        # word bboxes are unrotated like get_drawings -> map to display space too
+        if M is None:
+            return dict(x0=w[0], y0=w[1], x1=w[2], y1=w[3])
+        cs = [pymupdf.Point(x, y) * M for x in (w[0], w[2]) for y in (w[1], w[3])]
+        return dict(x0=min(c.x for c in cs), y0=min(c.y for c in cs),
+                    x1=max(c.x for c in cs), y1=max(c.y for c in cs))
+
+    sh.words = [dict(**_wr(w), text=w[4].replace("\xad", "-"), block=w[5], line=w[6])
                 for w in page.get_text("words")]
     _build_runs(sh)
     _find_texts(sh, page)
@@ -185,6 +209,8 @@ def _parse_bom(sh, page):
     ns = [w for w in sh.words if w["text"] == "N.S."]
     if not head or not comp or not ns:
         return
+    if any(w["y1"] - w["y0"] > w["x1"] - w["x0"] for w in head + comp + ns):
+        return  # table text runs vertically (e.g. content sideways after page rotation)
     x_desc, x_ns, x_qty = comp[0]["x0"] - 1, ns[0]["x0"] - 1, head[0]["x0"] - 1
     x_right = x_qty + 60
     rows, section, cat = [], None, None
@@ -327,6 +353,8 @@ def _find_labels(sh):
         px, py = (t["tx"], t["ty"]) if t["tx"] is not None else (t["x"], t["y"])
         run, d = _near_run(sh, px, py, 20)
         t["run"] = run["id"] if run else None
+    seen = set()
+    sh.labels = [l for l in sh.labels if not (l["spool"] in seen or seen.add(l["spool"]))]
 
 
 def _find_gaps(sh):

@@ -72,7 +72,16 @@ def spool_pages(src_docs, sheets, spools, details=None):
             w, h = clip.width * s, clip.height * s
             tgt = pymupdf.Rect(cell.x0 + (cell.width - w) / 2, cell.y0 + 30, cell.x0 + (cell.width + w) / 2, cell.y0 + 30 + h)
             doc, pno = src_docs[sidx]
-            page.show_pdf_page(tgt, doc, pno, clip=clip)
+            src_page = doc[pno]
+            if src_page.rotation:
+                # clip must be in the source page's unrotated space; our coords are display space
+                cs = [pymupdf.Point(x, y) * src_page.derotation_matrix
+                      for x in (clip.x0, clip.x1) for y in (clip.y0, clip.y1)]
+                clip_src = pymupdf.Rect(min(c.x for c in cs), min(c.y for c in cs),
+                                        max(c.x for c in cs), max(c.y for c in cs))
+            else:
+                clip_src = clip
+            page.show_pdf_page(tgt, doc, pno, clip=clip_src)
 
             def T(x, y):
                 return tgt.x0 + (x - clip.x0) * s, tgt.y0 + (y - clip.y0) * s
