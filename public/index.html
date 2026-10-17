@@ -59,6 +59,22 @@ async function go(sample){
 }
 $('#run').onclick=()=>go(false);$('#sample').onclick=()=>go(true);
 const dl=(b,n)=>{const a=document.createElement('a');a.href='data:application/pdf;base64,'+b;a.download=n;a.click()};
+// --- PayPal (sandbox): fabrication-order deposit checkout ---
+function quote(){const w=_j?_j.spools.reduce((a,s)=>a+s.welds.length,0):0,s=_j?_j.spools.length:0;
+ return {total:(w*8+s*25).toFixed(2),desc:`Spool fabrication deposit: ${s} spools x $25 + ${w} welds x $8`,w,s}}
+async function payNow(){const q=quote();
+ try{const r=await fetch('/api/paypal',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({action:'create',amount:q.total,description:q.desc,return_url:location.origin+'/'})});
+  const j=await r.json();if(j.error)throw new Error(j.error);location.href=j.approve_url;
+ }catch(e){alert('PayPal: '+e.message)}}
+(async()=>{const q=new URLSearchParams(location.search);const oid=q.get('token');
+ if(q.get('cancelled')){$('#status').innerHTML='<span class="warn">PayPalでの支払いがキャンセルされました</span>';history.replaceState({},'',location.pathname);return}
+ if(!oid)return;$('#status').textContent='PayPal 支払いを確定中…';
+ try{const r=await fetch('/api/paypal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'capture',order_id:oid})});
+  const j=await r.json();if(j.error)throw new Error(j.error);
+  $('#status').innerHTML=`<span class="ok">PayPal 支払い完了: ${esc(j.amount)} — capture ${esc(j.capture_id)} (${esc(j.payer)}) 発注を受け付けました</span>`;
+ }catch(e){$('#status').innerHTML='<span class="ng">PayPal capture error: '+e.message+'</span>'}
+ history.replaceState({},'',location.pathname)})();
 const dlt=(t,n)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/plain'}));a.download=n;a.click()};
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function model3dCard(j){
@@ -86,6 +102,10 @@ function render(j){
  <button class="sec" onclick="dlt(_j.cypher,'spool_graph.cypher')">Neo4j グラフ (Cypher)</button>
  <span class="muted">Neo4j: ${_j.neo4j&&_j.neo4j.pushed?'<span class=ok>保存済み ('+_j.neo4j.statements+' 文)</span>':'未接続 — Cypherをダウンロードしてインポート'}</span></div>
  ${(j.warnings||[]).map(w=>`<p class="warn"><b>警告:</b> ${esc(w)}</p>`).join('')}
+ <div class="row" style="border-top:1px solid #e5e5e5;padding-top:10px;margin-top:6px"><b>発注見積:</b>
+  <span id="quote">$${quote().total}（${quote().s} スプール × $25 + ${quote().w} 溶接 × $8）</span>
+  <button onclick="payNow()" style="background:#ffc439;color:#111;font-weight:700">PayPal で発注・支払う（sandbox）</button>
+  <span class="muted">スプール製作デポジット — PayPal Orders API</span></div>
  <p class="muted">AI: ${esc(rv.provider||'オフ（ルールのみ）')}${(rv.fallback_from||[]).length?' <span class=warn>（'+esc(rv.fallback_from.map(f=>f.split(':')[0]).join(', '))+' は利用不可のためフォールバック）</span>':''}</p>${rv.summary_ja?`<p>${esc(rv.summary_ja)}</p>`:''}`;
  if(rv.checks&&rv.checks.length){const ng=rv.checks.filter(c=>!c.ok).length;
   h+=`<details ${ng?'open':''}><summary>BOM照合（シートBOM＝スプール配分の合計）: <span class="${ng?'ng':'ok'}">${ng?ng+'件不一致':'全項目一致'}</span></summary><table><tr><th>SHT</th><th>PT</th><th>品名</th><th>BOM</th><th>配分合計</th><th></th></tr>`+
