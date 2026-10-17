@@ -139,6 +139,10 @@ const mEnd=new THREE.MeshStandardMaterial({color:0xc0392b,metalness:0.3,roughnes
 function cylBetween(A,B,r,mat){const d=B.clone().sub(A),L=d.length();if(L<0.1)return null;
  const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,L,20),mat);
  m.position.copy(A.clone().add(B).multiplyScalar(0.5));
+ m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize());return m;}
+function coneBetween(A,B,rA,rB,mat){const d=B.clone().sub(A),L=d.length();if(L<0.1)return null;
+ const m=new THREE.Mesh(new THREE.CylinderGeometry(rB,rA,L,20),mat);
+ m.position.copy(A.clone().add(B).multiplyScalar(0.5));
  m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize());return m}
 // Elbow per DHFPipeSpool MyBendVisual3D: vertex at node, tangent = R*tan(phi/2),
 // center = T1 + R*n (n = in-plane normal toward bend inside). R shrinks on short legs
@@ -220,7 +224,7 @@ function show3d(j,mode){
     const br=cylBetween(p,p.clone().addScaledVector(d,od*0.9),pr*1.15,mPipe);if(br)group.add(br);}}
   else if(n.type==='flange'&&links.length>=1){const d=links[0].dir,f=FL[bore]||{D:od*2.1,t:18,C:od*1.6};
    const fb=cylBetween(p.clone().addScaledVector(d,-2),p.clone().addScaledVector(d,f.t+2),f.D/2,mFlange);if(fb)group.add(fb);
-   const hub=cylBetween(p.clone().addScaledVector(d,f.t),p.clone().addScaledVector(d,f.t+od*0.35),pr*1.15,mFlange);if(hub)group.add(hub);}
+   const hub=coneBetween(p.clone().addScaledVector(d,f.t),p.clone().addScaledVector(d,f.t+od*0.45),pr*1.18,pr,mFlange);if(hub)group.add(hub);}
   else if(n.type==='weld'&&links.length>=1){const d=links[0].dir;
    const w=cylBetween(p.clone().addScaledVector(d,-5),p.clone().addScaledVector(d,5),pr*1.08,mWeld);if(w)group.add(w);}
   else if(n.type==='end'&&links.length===1){const cap=new THREE.Mesh(new THREE.SphereGeometry(pr*0.9,14,10),mEnd);cap.position.copy(p);group.add(cap);}
