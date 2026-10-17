@@ -217,6 +217,22 @@ def _sheet_bore(sh):
     return 0
 
 
+def _flange_types(sh):
+    """bore -> 'wn' (weld-neck, tapered hub) | 'sop' (slip-on/plate, flat disc only).
+    Parsed from BOM flange descriptions; default 'sop'."""
+    import re as _re
+    ft = {}
+    for b in sh.bom:
+        d = (b.get("desc") or "").upper()
+        if "FLANGE" not in d and "ﾌﾗﾝｼﾞ" not in str(b.get("desc") or ""):
+            continue
+        m = _re.search(r"\d+", str(b.get("ns", "")))
+        bore = int(m.group()) if m else 0
+        t = "wn" if ("WN" in d or "WELD NECK" in d or "WELDNECK" in d) else "sop"
+        ft.setdefault(bore, t)
+    return ft
+
+
 def build(sheets, spools, docs):
     """sheets: extract output; spools: assemble output; docs: {sheet_index: (doc, page_no)}.
     Returns model dict with per-spool local coords and per-sheet assembled coords."""
@@ -224,6 +240,7 @@ def build(sheets, spools, docs):
            "threejs_note": "Three.js(Y up): (x,y,z) = (X, Z, -Y)", "sheets": [], "spools": []}
     for sh in sheets:
         sh_bore = _sheet_bore(sh)
+        sh_ftype = _flange_types(sh)
         page = docs[sh.index][0][docs[sh.index][1]] if docs.get(sh.index) else None
         segs, elbows = _pipe_pieces(sh)
         pts, ptag = [], []
@@ -311,6 +328,8 @@ def build(sheets, spools, docs):
             n["refs"] = [f"W{w}" for w in ref] + [f"PT{t}" for t in tag]
             if any(sg for sg in n["segs"] if seg3d[sg]["kind"] == "joint"):
                 n["type"] = "flange" if n["type"] in ("end", "weld") else n["type"]
+            if n["type"] == "flange":
+                n["ftype"] = sh_ftype.get(sh_bore, sh_ftype.get(0, "sop"))
         out["sheets"].append({"index": sh.index, "sheet_no": sh.title.get("sheet_no"),
                               "file": sh.title.get("file"), "nodes": nodes, "segs": seg3d,
                               "dims_found": len(dims), "bore": sh_bore})
@@ -379,7 +398,8 @@ def build(sheets, spools, docs):
             g = shd["gpos"][i]
             local = tuple(round(g[k] - origin[k], 1) for k in range(3))
             outnodes.append({"id": node_ids[(si, i)], "type": n["type"], "refs": n["refs"],
-                             "bore": bore, "p": list(local), "g": [round(v, 1) for v in g],
+                             "bore": bore, "ftype": n.get("ftype"),
+                             "p": list(local), "g": [round(v, 1) for v in g],
                              "sheet": shd["sheet_no"], "px": [round(n["x"], 1), round(n["y"], 1)]})
         for shd in out["sheets"]:
             for s in shd["segs"]:
@@ -404,6 +424,7 @@ def build(sheets, spools, docs):
     for shd in out["sheets"]:
         shd["model"] = {
             "nodes": [{"id": i, "g": [round(v, 1) for v in shd["gpos"][i]], "type": n["type"],
+                       "ftype": n.get("ftype"),
                        "refs": n["refs"], "run": n["run"], "x": round(n["x"], 1), "y": round(n["y"], 1)}
                       for i, n in enumerate(shd["nodes"]) if i in shd["gpos"]],
             "segs": [{"a": s["a"], "b": s["b"], "axis": s["axis"], "length_mm": s["length_mm"],
