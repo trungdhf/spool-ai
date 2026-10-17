@@ -118,34 +118,65 @@ window.setup3d=function(j){
  ren=new THREE.WebGLRenderer({antialias:true});ren.setSize(el.clientWidth,el.clientHeight);el.appendChild(ren.domElement);
  lab=new CSS2DRenderer();lab.setSize(el.clientWidth,el.clientHeight);lab.domElement.style.cssText='position:absolute;pointer-events:none;top:0';el.style.position='relative';el.appendChild(lab.domElement);
  orb=new OrbitControls(cam,ren.domElement);
- scene.add(new THREE.AmbientLight(0xffffff,1.1));
- const d=new THREE.DirectionalLight(0xffffff,1.2);d.position.set(3,6,4);scene.add(d);
+ scene.add(new THREE.AmbientLight(0xffffff,0.7));
+ scene.add(new THREE.HemisphereLight(0xdfeaf5,0x30363d,0.9));
+ const d=new THREE.DirectionalLight(0xffffff,1.6);d.position.set(3,6,4);scene.add(d);
+ const d2=new THREE.DirectionalLight(0xffffff,0.7);d2.position.set(-4,-2,5);scene.add(d2);
  scene.add(new THREE.AxesHelper(1500)); // x=E赤, y=Z(up)緑, z=-N青
- group=new THREE.Group();scene.add(group);
+ group=new THREE.Group();scene.add(group);window.__g3d={group,scene,cam,THREE};
  const sel=document.getElementById('sel3d');sel.onchange=()=>show3d(j,sel.value);
  show3d(j,sel.value);
  (function loop(){requestAnimationFrame(loop);orb.update();ren.render(scene,cam);lab.render(scene,cam);})();
 };
 const V=p=>new THREE.Vector3(p[0],p[2],-p[1]); // (X,Y,Z)->three(x,y,z)=(E,Zup,-N)
-const NC={weld:0xffa726,end:0xef5350,flange:0xb0bec5,elbow:0x42a5f5,tee:0x66bb6a};
+// JIS pipe OD (mm) + JIS 10K flange dims — fallback when drawing gives none (from DHFPipeSpool Data/Pipedata.xlsx)
+const POD={10:17.3,15:21.7,20:27.2,25:34,32:42.7,40:48.6,50:60.5,65:76.3,80:89.1,100:114.3,125:139.8,150:165.2,200:216.3,250:267.4,300:318.5};
+const FL={15:{D:95,t:12,C:70},20:{D:100,t:14,C:75},25:{D:125,t:14,C:90},32:{D:135,t:16,C:100},40:{D:140,t:16,C:105},50:{D:155,t:16,C:120},65:{D:175,t:18,C:140},80:{D:185,t:18,C:150},100:{D:210,t:18,C:175},125:{D:250,t:20,C:210},150:{D:280,t:22,C:240},200:{D:330,t:22,C:290},250:{D:400,t:24,C:355},300:{D:445,t:24,C:400},350:{D:490,t:26,C:445},400:{D:560,t:28,C:510}};
+const mPipe=new THREE.MeshStandardMaterial({color:0xc4d3df,metalness:0.35,roughness:0.55});
+const mFlange=new THREE.MeshStandardMaterial({color:0x8fa3b8,metalness:0.5,roughness:0.4});
+const mWeld=new THREE.MeshStandardMaterial({color:0xd98a2b,metalness:0.3,roughness:0.6});
+const mEnd=new THREE.MeshStandardMaterial({color:0xc0392b,metalness:0.3,roughness:0.6});
+function cylBetween(A,B,r,mat){const d=B.clone().sub(A),L=d.length();if(L<0.1)return null;
+ const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,L,20),mat);
+ m.position.copy(A.clone().add(B).multiplyScalar(0.5));
+ m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize());return m}
+// Elbow per DHFPipeSpool MyBendVisual3D: vertex at node, tangent = R*tan(phi/2),
+// center = T1 + R*n (n = in-plane normal toward bend inside). R shrinks on short legs
+// so straight pipe never overshoots the tangent point (no pipe piercing the bend).
+function bendGeom(Vp,d1,d2,R,tube,tIn){
+ const cosd=THREE.MathUtils.clamp(d1.dot(d2),-1,1);
+ const phi=Math.PI-Math.acos(cosd); // bend angle: 0=straight
+ if(phi<0.05)return null;
+ const t=(tIn!==undefined)?tIn:R*Math.tan(phi/2);
+ R=t/Math.tan(phi/2);
+ const T1=Vp.clone().addScaledVector(d1,t),T2=Vp.clone().addScaledVector(d2,t);
+ const n=d2.clone().addScaledVector(d1,-d1.dot(d2)).normalize();
+ const C=T1.clone().addScaledVector(n,R);
+ const x1=T1.clone().sub(C).normalize(),x2=T2.clone().sub(C).normalize();
+ const z=new THREE.Vector3().crossVectors(x1,x2);
+ const arc=Math.atan2(z.length(),x1.dot(x2));
+ if(z.length()<1e-6||arc<0.02)return null;
+ z.normalize();const y=new THREE.Vector3().crossVectors(z,x1).normalize();
+ const tor=new THREE.Mesh(new THREE.TorusGeometry(R,tube,14,24,arc),mPipe);
+ tor.applyMatrix4(new THREE.Matrix4().makeBasis(x1,y,z).setPosition(C));
+ return tor;}
 function show3d(j,mode){
  while(group.children.length)group.remove(group.children[0]);
- let nodes={},segs=[],title='';
+ let nodes={},segs=[],defBore=80;
  if(mode==='all'){
   let off=0;
   for(const shd of j.model3d.sheets){const m=shd.model;
    let mn=1e9,mx=-1e9;
    for(const n of m.nodes){mn=Math.min(mn,n.g[0]);mx=Math.max(mx,n.g[0])}
    if(!m.nodes.length){mn=0;mx=0}
-   for(const n of m.nodes)nodes['s'+shd.index+':'+n.id]={...n,p:[n.g[0]+off-mn,n.g[1],n.g[2]],id:n.id};
+   for(const n of m.nodes)nodes['s'+shd.index+':'+n.id]={...n,p:[n.g[0]+off-mn,n.g[1],n.g[2]],id:n.id,bore:n.bore||shd.bore};
    for(const s of m.segs)segs.push({...s,a:'s'+shd.index+':'+s.a,b:'s'+shd.index+':'+s.b});
    off+=mx-mn+4000;}
   document.getElementById('v3dtable').innerHTML='';
  }else{
-  const sp=j.model3d.spools[+mode];title=sp.name;
+  const sp=j.model3d.spools[+mode];defBore=sp.bore||80;
   for(const n of sp.nodes)nodes[n.id]={...n,p:[...n.p]};
   segs=sp.segments;
-  // spread disconnected fragments (e.g. spool continues on other sheets) side by side
   const par={};const find=x=>par[x]===x?x:(par[x]=find(par[x]));
   for(const id in nodes)par[id]=id;
   for(const s of segs)if(nodes[s.a]&&nodes[s.b])par[find(s.a)]=find(s.b);
@@ -156,20 +187,58 @@ function show3d(j,mode){
    for(const id of ids)nodes[id].p[0]+=off-mn;off+=mx-mn+3000;}
   document.getElementById('v3dtable').innerHTML=segsTable(sp);
  }
- const mat={pipe:new THREE.MeshStandardMaterial({color:0x4f9cf0}),joint:new THREE.MeshStandardMaterial({color:0xffd54f}),bridge:new THREE.MeshStandardMaterial({color:0x66bb6a}),SL:new THREE.MeshStandardMaterial({color:0xba68c8})};
- let min=[1e9,1e9,1e9],max=[-1e9,-1e9,-1e9];
- for(const s of segs){const a=nodes[s.a],b=nodes[s.b];if(!a||!b)continue;
-  const A=V(a.p),B=V(b.p),dir=B.clone().sub(A),L=dir.length();if(L<0.1)continue;
-  const od=(a.bore||b.bore||80)*1.6;
-  const c=new THREE.Mesh(new THREE.CylinderGeometry(od/2,od/2,L,14),mat[s.axis==='SL'?'SL':(s.kind||'pipe')]||mat.pipe);
-  c.position.copy(A.clone().add(B).multiplyScalar(0.5));c.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());group.add(c);
-  [a.p,b.p].forEach(p=>{for(let k=0;k<3;k++){min[k]=Math.min(min[k],p[k]);max[k]=Math.max(max[k],p[k])}});}
- for(const n of Object.values(nodes)){
-  const r=n.type==='flange'?(n.bore||80)*1.6:(n.bore||80)*0.9;
-  const g=n.type==='flange'?new THREE.CylinderGeometry(r,r,(n.bore||80)*0.5,16):new THREE.SphereGeometry(r,12,10);
-  const me=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:NC[n.type]||0xffa726}));me.position.copy(V(n.p));group.add(me);
-  if(n.refs&&n.refs.length){const t=document.createElement('div');t.textContent=n.refs.join(' ');t.style.cssText='color:#fff;font-size:12px;background:#0008;padding:0 4px;border-radius:3px';const o=new CSS2DObject(t);o.position.copy(V(n.p).add(new THREE.Vector3(0,(n.bore||80)*2.2,0)));group.add(o);}
+ const adj={};
+ for(const s of segs){if((s.kind||'pipe')!=='pipe')continue;const a=nodes[s.a],b=nodes[s.b];if(!a||!b)continue;
+  const A=V(a.p),B=V(b.p),d=B.clone().sub(A).normalize();
+  (adj[s.a]=adj[s.a]||[]).push({o:s.b,dir:d});
+  (adj[s.b]=adj[s.b]||[]).push({o:s.a,dir:d.clone().negate()});}
+ const tanLen={};
+ for(const id in adj){const links=adj[id];
+  if(links.length===2){const cosd=THREE.MathUtils.clamp(links[0].dir.dot(links[1].dir),-1,1);
+   const phi=Math.PI-Math.acos(cosd);
+   if(phi>0.05){const n=nodes[id],bore=n.bore||defBore,p=V(n.p);
+    const leg=Math.min(V(nodes[links[0].o].p).distanceTo(p),V(nodes[links[1].o].p).distanceTo(p));
+    tanLen[id]=Math.min(1.5*bore*Math.tan(phi/2),leg*0.45);}}}
+ for(const s of segs){if((s.kind||'pipe')!=='pipe')continue;const a=nodes[s.a],b=nodes[s.b];
+  const A=V(a.p),B=V(b.p),dir=B.clone().sub(A).normalize(),L=A.distanceTo(B);
+  const od=POD[a.bore||b.bore||defBore]||(a.bore||b.bore||defBore)*1.2;
+  const ta=Math.min(tanLen[s.a]||0,L*0.45),tb=Math.min(tanLen[s.b]||0,L*0.45);
+  const m=cylBetween(A.clone().addScaledVector(dir,ta),B.clone().addScaledVector(dir,-tb),od/2,mPipe);if(m)group.add(m);}
+ for(const n of Object.values(nodes)){const p=V(n.p);const links=adj[n.id]||[];
+  const bore=n.bore||defBore,od=POD[bore]||bore*1.2,pr=od/2;
+  if(links.length===2&&tanLen[n.id]!==undefined){
+   const e=bendGeom(p,links[0].dir,links[1].dir,1.5*bore,pr,tanLen[n.id]);if(e)group.add(e);
+   if(n.type==='weld'){const d=links[0].dir;
+    const w=cylBetween(p.clone().addScaledVector(d,-5),p.clone().addScaledVector(d,5),pr*1.08,mWeld);if(w)group.add(w);}}
+  else if(n.type==='tee'&&links.length>=3){
+   let bi=0,bj=1,bd=-1;for(let i=0;i<links.length;i++)for(let k=i+1;k<links.length;k++){
+    const d=Math.abs(links[i].dir.dot(links[k].dir));if(d>bd){bd=d;bi=i;bj=k}}
+   const others=links.map((l,i)=>i).filter(i=>i!==bi&&i!==bj);
+   const a=links[bi].dir;
+   const run=cylBetween(p.clone().addScaledVector(a,-od*0.8),p.clone().addScaledVector(a,od*0.8),pr*1.15,mPipe);if(run)group.add(run);
+   for(const oi of others){const d=links[oi].dir;
+    const br=cylBetween(p,p.clone().addScaledVector(d,od*0.9),pr*1.15,mPipe);if(br)group.add(br);}}
+  else if(n.type==='flange'&&links.length>=1){const d=links[0].dir,f=FL[bore]||{D:od*2.1,t:18,C:od*1.6};
+   const fb=cylBetween(p.clone().addScaledVector(d,-2),p.clone().addScaledVector(d,f.t+2),f.D/2,mFlange);if(fb)group.add(fb);
+   const hub=cylBetween(p.clone().addScaledVector(d,f.t),p.clone().addScaledVector(d,f.t+od*0.35),pr*1.15,mFlange);if(hub)group.add(hub);}
+  else if(n.type==='weld'&&links.length>=1){const d=links[0].dir;
+   const w=cylBetween(p.clone().addScaledVector(d,-5),p.clone().addScaledVector(d,5),pr*1.08,mWeld);if(w)group.add(w);}
+  else if(n.type==='end'&&links.length===1){const cap=new THREE.Mesh(new THREE.SphereGeometry(pr*0.9,14,10),mEnd);cap.position.copy(p);group.add(cap);}
+  if(n.refs&&n.refs.length){const t=document.createElement('div');t.textContent=n.refs.join(' ');t.style.cssText='color:#fff;font-size:12px;background:#0008;padding:0 4px;border-radius:3px';const o=new CSS2DObject(t);o.position.copy(p.clone().add(new THREE.Vector3(0,od*1.6,0)));group.add(o);}
  }
+ // valve: joint seg between two flange nodes -> body + stem + handwheel
+ for(const s of segs){if(s.kind!=='joint')continue;
+  const a=nodes[s.a],b=nodes[s.b];if(!a||!b)continue;
+  if(a.type!=='flange'||b.type!=='flange')continue;
+  const A=V(a.p),B=V(b.p),d=B.clone().sub(A).normalize();
+  const bore=a.bore||b.bore||defBore,f=FL[bore]||{D:(POD[bore]||bore*1.2)*2.1,t:18,C:0};
+  const fb=cylBetween(A.clone().addScaledVector(d,f.t+2),B.clone().addScaledVector(d,-f.t-2),f.D/2*0.85,mFlange);if(fb)group.add(fb);
+  const mid=A.clone().add(B).multiplyScalar(0.5);
+  const up=new THREE.Vector3(0,0,1).cross(d);if(up.length()<0.1)up.set(0,1,0);up.normalize();
+  const stem=cylBetween(mid.clone().addScaledVector(up,f.D*0.3),mid.clone().addScaledVector(up,f.D*0.9),(POD[bore]||bore*1.2)*0.14,mFlange);if(stem)group.add(stem);
+  const hw=new THREE.Mesh(new THREE.CylinderGeometry(f.D*0.32,f.D*0.32,(POD[bore]||bore*1.2)*0.15,14),mWeld);
+  hw.position.copy(mid.clone().addScaledVector(up,f.D*0.95));
+  hw.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),up);group.add(hw);}
  const box=new THREE.Box3().setFromObject(group),ctr=box.getCenter(new THREE.Vector3()),sz=box.getSize(new THREE.Vector3());
  const R=Math.max(sz.x,sz.y,sz.z,500);
  cam.position.set(ctr.x+R*0.8,ctr.y+R*0.7,ctr.z+R*0.9);orb.target.copy(ctr);cam.updateProjectionMatrix();
